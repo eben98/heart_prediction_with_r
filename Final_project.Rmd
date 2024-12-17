@@ -1,0 +1,554 @@
+---
+title: "Final Project - Heart Disease Prediction"
+author: "Ebenezer Daniel"
+date: "2024-11-11"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(caret)
+library(factoextra)
+library(irlba)
+library(cluster)
+library(rattle)
+library(rpart)
+library(pROC)
+```
+
+## Final Project
+
+### Single Problem (100 pts – see rubric)
+
+## a.) Data gathering and integration
+
+The first part is to get the data you will use. You may use anything that has not been used in an assignment or tutorial. It must have at least 100 data points and must include both numerical and categorial (or ordinal) variables. I recommend keeping this relatively straightforward because data cleaning can take a lot of time if you choose a large, messy dataset. *Kaggle* (<https://www.kaggle.com/datasets>) and the *University of California at Irvine (UCI)* (<https://archive.ics.uci.edu/ml/index.php>) maintain collections of datasets, some even telling you if they are good examples for testing specific machine learning techniques. You may also choose to join together more than one dataset, for example to merge data on health outcomes by US state with a dataset on food statistics per state. Merging data is not required and will earn you a bonus point in this step.
+
+Loading the dataset
+
+```{r}
+medical_data <- read.csv("Patients Data ( Used for Heart Disease Prediction ).csv", header = TRUE, sep = ",")
+head(medical_data)
+```
+
+I have loaded a medical dataset that is used for Heart Disease Prediction. This datasets contains 35 columns/features.
+
+## b.) Data exploration
+
+Using data exploration to understand what is happening is important throughout the pipeline, and is not limited to this step. However, it is important to use some exploration early on to make sure you understand your data. You must at least consider the distributions of each variable and at least some of the relationships between pairs of variables.
+
+Understanding the data with visualizations
+
+```{r}
+# Define numerical columns and initialize an empty list for plots
+numerical_cols <- c("HeightInMeters", "WeightInKilograms", "BMI")
+plots <- list()
+
+summary(medical_data[, numerical_cols])
+
+# Generate plots and save to the list
+for (col in numerical_cols) {
+  plots[[col]] <- ggplot(medical_data, aes_string(x = col)) + 
+    geom_histogram(bins = 20, fill = "red", alpha = 0.5) + 
+    ggtitle(paste("Distribution of", col)) + 
+    theme_minimal()
+}
+
+# Display each plot
+for (plot in plots) {
+  print(plot)
+}
+
+
+```
+
+[Numerical Columns/Features: Height, Weight and BMI.]{.underline}
+
+We can see the Histograms for Height, Weight and BMI. The histogram for height seems to be symmetric, while the histograms for Weight and BMI are positively skewed with some outliers.
+
+```{r}
+# List of categorical columns
+categorical_cols <- c("Sex", "GeneralHealth", "AgeCategory", "RaceEthnicityCategory")
+
+# Loop to create and print bar plots for each categorical variable
+for (col in categorical_cols) {
+  p <- ggplot(medical_data, aes_string(x = col)) + 
+    geom_bar(fill = "green", alpha = 0.5,) +
+    geom_text(stat = "count", aes(label = ..count..), vjust = -0.5) +
+    ggtitle(paste("Distribution of", col)) + 
+    theme_minimal()
+  
+    if (col == "AgeCategory") {
+    p <- p + theme(axis.text.x = element_text(angle = 35, hjust = 1))
+    }
+    
+    if (col == "RaceEthnicityCategory") {
+    p <- p + theme(axis.text.x = element_text(angle = 5, hjust = 1))
+    }
+    
+  print(p)  # Ensures the plot displays within the loop
+}
+
+
+```
+
+[For Categorical Columns/Features: Sex, General Health, Age Category and Race Ethnicity Category.]{.underline}
+
+We have the bar plots for the categorical columns.
+
+-   For Sex of the patients we see that the number female patients are more than the male.
+
+-   For General Health, we see that the number of patients with excellent health is more than the other categories.
+
+-   For Age Category, we see that the number of patients in the age category 65- 69 is more than the other categories
+
+-   For Race Ethnicity Category, we see that the number of patients in the White only Non Hispanic is more than the other categories.
+
+[**Combing the features to better understand the data:**]{.underline}
+
+```{r}
+# Box plot of BMI by Sex with outlier points
+ggplot(medical_data, aes(x = Sex, y = BMI)) + 
+  stat_boxplot(geom = "errorbar", width = 0.5) +
+  geom_boxplot(fill = "blue", alpha = 0.5,
+               outlier.colour = "red", 
+               outlier.shape = 16, 
+               outlier.size = 2) + 
+  ggtitle("BMI Distribution by Sex") + 
+  theme_minimal()
+
+# Box plot of BMI by General Health with outlier points
+ggplot(medical_data, aes(x = GeneralHealth, y = BMI)) + 
+  stat_boxplot(geom = "errorbar", width = 0.5) +
+  geom_boxplot(fill = "red", alpha = 0.5, 
+               outlier.colour = "blue", 
+               outlier.shape = 16, 
+               outlier.size = 2) + 
+  ggtitle("BMI Distribution by General Health") + 
+  theme_minimal()
+```
+
+As we can see from the Box plot, the BMI distribution by Sex and General health along with their outliers.
+
+```{r}
+# Stacked bar plot of General Health by Sex
+ggplot(medical_data, aes(x = Sex, fill = GeneralHealth)) + 
+  geom_bar(position = "fill") + 
+  ggtitle("Proportion of General Health by Sex") + 
+  ylab("Proportion") + 
+  theme_minimal()
+
+```
+
+This Plot shows the proportion of General Health by Sex. We can see that the proportion of excellent for male is slight larger when compared to female in the same category. Other than this everything looks almost the same.
+
+```{r}
+# Scatter plot of Height vs. Weight, colored by Sex
+ggplot(medical_data, aes(x = HeightInMeters, y = WeightInKilograms, color = Sex)) + 
+  geom_point(alpha = 0.6) + 
+  ggtitle("Height vs. Weight by Sex") + 
+  theme_minimal()
+
+# Scatter plot of Height vs. Weight, colored by Age Category
+ggplot(medical_data, aes(x = HeightInMeters, y = WeightInKilograms, color = AgeCategory)) + 
+  geom_point(alpha = 0.6) + 
+  ggtitle("Height vs. Weight by Age Category") + 
+  theme_minimal()
+
+```
+
+This scatter plot shows the relationship between Height and Weight by Sex and Age Category. We can see that the relationship between Height and Weight is almost the same for sex and age category.
+
+```{r}
+# Faceted bar plot of Sex by Age Category
+ggplot(medical_data, aes(x = Sex)) + 
+  geom_bar( fill = "purple", alpha = 0.7) + 
+  facet_wrap(~ AgeCategory) + 
+  ggtitle("Distribution of Sex Across Age Categories") + 
+  theme_minimal()
+
+# Faceted bar plot of General Health by Age Category
+ggplot(medical_data, aes(x = GeneralHealth)) + 
+  geom_bar( fill = "yellow") + 
+  facet_wrap(~ AgeCategory) + 
+  ggtitle("Distribution of General Health Across Age Categories") + 
+  theme_minimal()
+
+```
+
+For this Faceted bar plot, we can see the distribution of Sex, General Health across Age Categories. We can see that the Age from 60 to 74 for both male and females are more than the other categories. For General Health, the Very good for the Age 65 to 69 is more than the other categories across all the Age Categories.
+
+Contingency table to check for HadHeartAttack and HadStroke variables.
+
+```{r}
+table(medical_data$HadHeartAttack, medical_data$HadStroke)
+```
+
+We can see that in most cases if you have a heart attack, it means you also had a stroke.
+
+Correlation table to check for correlation between variables.
+
+```{r}
+correlation_matrix <- cor(medical_data[, c("HadHeartAttack", "HadStroke", "HadAngina", "ChestScan", "AlcoholDrinkers")])
+correlation_matrix
+```
+
+Correlation matrix is done to check if HadStroke, HadAngina, ChestScan and AlcoholDrinkers are highly correlated with HadHeartAttack. If they are we can remove them from the dataset. But in this case it is not the case.
+
+## c.) Data Cleaning
+
+Don’t forget – this can take a lot of the time of the whole process. Your cleaning process must ensure that there are no missing values and all outliers must be considered. It may be reasonable to just remove rows with missing values, however, if your data or small or that would change the distributions of the variables, that will not be adequate and you will need to consider other options, as discussed in the modules on cleaning. Depending on your data and what you plan to do with it, you may also need to apply other processes we discussed. For example, clean up strings for consistency, deal with date formatting, change variable types between categorical and numeric, bin, smooth, group, aggregate or reshape. Make the case with visualization or by showing resulting summary statistics that your data are clean enough to continue with your analysis.
+
+[Check for missing values:]{.underline}
+
+```{r}
+missing_values <- colSums(is.na(medical_data))
+missing_values[missing_values > 0]
+```
+
+We can see that there are no missing values in the dataset.
+
+[Check for outliers]{.underline}: It was shown in the Box plot above that there are outliers in the dataset. We are considering the outliers in the dataset.
+
+Remove unnecessary columns:
+
+```{r}
+medical_data <- medical_data %>% select(-c(PatientID, State, HeightInMeters, WeightInKilograms,))
+#DeafOrHardOfHearing, BlindOrVisionDifficulty, DifficultyConcentrating, DifficultyWalking, DifficultyDressingBathing, DifficultyErrands, HIVTesting, FluVaxLast12, PneumoVaxEver, TetanusLast10Tdap, HighRiskLastYear, CovidPos
+```
+
+I have removed PatientID, State, HeightInMeters, WeightInKilograms columns from the dataset. I removed HeightInMeters and WeightInKilograms because I have BMI column which is a combination of Height and Weight.
+
+```{r}
+summary(medical_data)
+```
+
+## d.) Data Preprocessing
+
+In some cases, preprocessing is absolutely necessary. It is rarely a bad idea. Make the case for what is and is not necessary given what you plan to do with the data. This could include making dummy variables, applying normalization, binning and/or smoothing, and other transformations (see course module).
+
+Only keeping 10,000 rows and dropping the other rows.
+
+```{r}
+# Only keeping 10,000 rows
+set.seed(42)  # For reproducibility
+medical_data <- medical_data[sample(1:nrow(medical_data), 10000), ]
+medical_data2 <- medical_data
+head(medical_data)
+```
+
+Scaling the numeric columns and making dummy variables for the categorical columns.
+
+```{r}
+# Define numerical columns
+numeric_columns <- names(medical_data)[sapply(medical_data, is.numeric)]
+head(numeric_columns)
+
+# Change categorical variables
+dummy_data <- dummyVars(" ~ .", data = medical_data)
+medical_data <- data.frame(predict(dummy_data, newdata = medical_data)) 
+
+# Standardize numerical columns
+medical_data$BMI <- scale(medical_data$BMI)
+head(medical_data)
+```
+
+Since HadHeartAttack, HadStroke, HadAngina, ChestScan and AlcoholDrinkers are binary variables we are not scaling them. Only BMI is scaled.
+
+Also binning of Age Category wasn't done since the Age Category was already put into groups.
+
+## e.) Clustering
+
+Remove the class label HadHeartAttack for Clustering.
+
+```{r}
+# Remove labels and encode categorical variables
+medical_data_cluster <- medical_data %>% select(-HadHeartAttack,) 
+head(medical_data_cluster)
+```
+
+### K-means clustering
+
+```{r}
+set.seed(123)
+
+prepoc <- preProcess(medical_data_cluster, method = c("center", "scale"))
+
+medical_data_cluster <- predict(prepoc, medical_data_cluster)
+
+# elbow method with wss
+fviz_nbclust(medical_data_cluster, kmeans, method = "wss", linecolor = "red",) 
+
+# silhouette method
+fviz_nbclust(medical_data_cluster, kmeans, method = "silhouette", linecolor = "red") 
+```
+
+There is no clear curve in the elbow method, and the maximum silhouette score is 0.09 and the clusters are not separable  but we can see that the silhouette method shows that the optimal number of clusters is 2. So we will use 2 clusters.
+
+```{r}
+# fit the data
+kmeans_fit <- kmeans(medical_data_cluster, centers = 2, nstart = 25)
+kmeans_fit
+```
+
+Display the cluster plot
+
+```{r}
+fviz_cluster(kmeans_fit, data = medical_data_cluster)
+```
+
+For comparision we are generating our PCA plot.
+
+```{r}
+# Calculate PCA
+pca = prcomp(medical_data_cluster)
+
+# Save as dataframe
+rotated_data = as.data.frame(pca$x)
+
+# Add original labels as a reference
+rotated_data$Color <- medical_data$HadHeartAttack
+
+# Plot and color by labels
+ggplot(data = rotated_data, aes(x = PC1, y = PC2, col = Color)) + geom_point(alpha = 0.3)
+```
+
+For K Means you get this by calling \$cluster on the fit.
+
+```{r}
+# Assign clusters as a new column
+rotated_data$Clusters = as.factor(kmeans_fit$cluster)
+
+# Plot and color by labels
+ggplot(data = rotated_data, aes(x = PC1, y = PC2, col = Clusters)) + geom_point()
+```
+
+### Hierarchical clustering
+
+```{r}
+distance_matrix <- dist(medical_data_cluster, method = 'euclidean')
+hfit <- hclust(distance_matrix, method = 'complete')
+plot(hfit)
+```
+
+```{r}
+summary(distance_matrix)
+```
+
+To identify the cut off point: elbow method
+
+```{r}
+# Knee plot
+fviz_nbclust(medical_data_cluster, FUN = hcut, method = "wss")
+```
+
+As we can there is no clear elbow point in the plot. It just keeps falling while we increase the clusters.
+
+Silhouette method:
+
+```{r}
+# Silhouette score comparison
+fviz_nbclust(medical_data_cluster, FUN = hcut, method = "silhouette")
+```
+
+Silhouette score is too low at 0.06 and the clusters peaked at cluster number equal to 2, We can see that the optimal number of clusters is 2 from the silhouette method.
+
+After identifying the optimal number of clusters, we can fit the model.
+
+```{r}
+h2 <- cutree(hfit, k=2)
+fviz_cluster(list(data = medical_data_cluster, cluster = h2))
+```
+
+Since the cluster boundaries might overlap, we can use PCA to visualize the clusters in a 2D space with scatter plot.
+
+```{r}
+# Assign clusters as a new column
+rotated_data$Clusters = as.factor(h2)
+# Plot and color by labels
+ggplot(data = rotated_data, aes(x = PC1, y = PC2, col = Clusters)) + geom_point()
+```
+
+Comparisions between K-means and HAC clusterings.
+
+```{r}
+result <- data.frame(HAC2 = h2, Kmeans = kmeans_fit$cluster)
+
+cross_tab <- table(result$HAC2, result$Kmeans)
+"Cross tabulation between k-means and HAC clusterings"
+cross_tab
+```
+
+Clustering did not work and we might need advanced techniques to cluster the data as there is no good separation between the data.
+
+## f.) Classification
+
+Use at least two classifiers to predict a label in your data. If a label was not provided with the data, use the clustering from the previous part. Follow the process for choosing the best parameters for your choice of classifier. Compare the accuracy of the two.
+
+```{r}
+head(medical_data)
+
+# convert the target variable to factor
+medical_data$HadHeartAttack <- as.factor(medical_data$HadHeartAttack)
+```
+
+Create a Data partition so that 70% of the data is used for training and 30% for testing.
+
+Split the data for train and test
+
+```{r}
+set.seed(123)
+
+index = createDataPartition(y = medical_data$HadHeartAttack, p = 0.7, list = FALSE)
+train_set = medical_data[index, ]
+test_set = medical_data[-index, ]
+```
+
+### Decision Tree
+
+```{r}
+set.seed(123)
+# 10 - fold cross validation
+train_control = trainControl(method = "cv", number = 10)
+
+# fit the model
+medical_data_tree <- train(HadHeartAttack ~., data = train_set, method = "rpart1SE", trControl = train_control)
+
+# evaluate the fit
+medical_data_tree
+```
+
+The Accuracy is 0.9428, 94.28% and the Kappa value is 0.28, 28%. Our data is imbalanced.
+
+```{r}
+fancyRpartPlot(
+  medical_data_tree$finalModel, 
+  caption = "Had Heart Attack Data",
+  main = "Plot of the Decision tree for Heart Disease data"
+  )
+```
+
+### Using KNN
+
+```{r}
+set.seed(123)
+
+medical_data_knnFit <- train(HadHeartAttack ~ ., data = train_set,
+                method = "knn", 
+                trControl = train_control, 
+                preProcess = c("center","scale")
+                )
+
+medical_data_knnFit
+
+#Output of kNN fit
+plot(medical_data_knnFit)
+```
+
+The Accuracy of KNN is 0.9450, 94.50%.
+
+[Comparison of the two classifiers accuracy:]{.underline} The Accuracy of both Decision Tree and KNN is almost the same. KNN has a slightly higher accuracy than Decision Tree with 94.38% compared to 94.31%. But the Kappa value is low which suggests that our data is imbalanced.
+
+## g.) Evaluation
+
+Using the better classifier from the previous step, perform a more sophisticated evaluation using the tools of Week 9. Specifically, (1) produce a 2x2 confusion matrix (if your dataset has more than two classes, bin the classes into two groups and rebuild the model), (2) calculate the precision and recall manually, and finally (3) produce an ROC plot (see Tutorial 9). Explain how these performance measures makes your classifier look compared to accuracy.
+
+1.  Confusion Matrix
+
+```{r}
+pred_tree <- predict(medical_data_tree, test_set)
+cm1 = confusionMatrix(test_set$HadHeartAttack, pred_tree)
+cm1
+```
+
+```{r}
+pred_knn <- predict(medical_data_knnFit, test_set)
+cm2 = confusionMatrix(test_set$HadHeartAttack, pred_knn)
+cm2
+```
+
+2.  Precision and Recall
+
+```{r}
+# Store the byClass object of confusion matrix as a dataframe
+metrics_tree <- as.data.frame(cm1$byClass)
+# View the object
+metrics_tree
+
+metrics_knn <- as.data.frame(cm2$byClass)
+metrics_knn
+```
+
+Precision and Recall for Decision Tree:
+
+```{r}
+"Precision:"
+metrics_tree[5,]
+"Recall:"
+metrics_tree[6,]
+```
+
+Precision and Recall for KNN:
+
+```{r}
+"Precision:"
+metrics_knn[5,]
+"Recall:"
+metrics_knn[6,]
+```
+
+3.  Produce ROC plot
+
+ROC plot for Decision Tree:
+
+```{r}
+pred_prob_tree <- predict(medical_data_tree, test_set, type = "prob")
+head(pred_prob_tree)
+```
+
+```{r}
+# And now we can create an ROC curve for our model.
+roc_obj <- roc((test_set$HadHeartAttack), pred_prob_tree[,1])
+plot(roc_obj, print.auc=TRUE)
+```
+
+ROC plot for KNN:
+
+```{r}
+pred_prob_knn <- predict(medical_data_knnFit, test_set, type = "prob")
+head(pred_prob_knn)
+```
+
+```{r}
+roc_obj <- roc((test_set$HadHeartAttack), pred_prob_knn[,1])
+plot(roc_obj, print.auc=TRUE)
+```
+
+By doing this evaluation, we found out the confusion matrix, precision and recall for both Decision Tree and KNN. We also plotted the ROC curve for both the classifiers. The ROC curve for KNN is better than Decision Tree by a small margin. The ROC curve for KNN is closer to the top left corner which is the best position for the ROC curve. Both are kind of similar. The overall accuracy score might be misleading. AUC metric on the other hand, combines the scores of sensitivity and specificity and it gives you a middle ground metric. It is a good metric to use when you have imbalanced data.
+
+## h.) Report
+
+In a single document, include the answers to all of the parts of this Problem, including this one. The report component specifically is about your overall takeaways from your data. What was interesting from your analysis?
+
+-   I took the heart disease data as it sounded interesting to me. Also predicting Heart Disease was fascinating to me.
+
+-   For data exploration, I also explored visualization between different variables, did contingency table and correlation matrix to find if the variables are correlated to each other. I did find out the number of female patients were more than the male patients.
+
+-   For data cleaning, I checked for missing values and outliers. All the outliers were considered. I removed unnecessary columns from the dataset. Also showed the summary after my data cleaning.
+
+-   For Data Preprocessing, I scaled the numerical columns and made dummy variables for the categorical columns. I also left the columns that had a binary value and did not find the need to scale them. Also, I did not bin the Age Category as it was already put into groups.
+
+-   For Clustering, I removed the class label and did the clustering, I did Kmeans and Hierarchical Clustering and found out the wss plot did not curve and no suitable elbow was found. The silhouette method showed that the optimal number of clusters is 2 for both k-means and HAC. I also did a PCA plot to visualize the clusters. I did a cross tabulation between k-means and HAC clustering. After all this I found out the data is not well separated and we might need advanced clustering techniques and methods to cluster the data.
+
+-   For classification I used to classification techniques: Decision Tree and KNN (K Nearest Neighbors) The accuracy of both Decision Tree and KNN are similar as both of them fall in 94% range with 94.42% and 94.50%. But the Kappa value is low as it suggests that our data is imbalanced.
+
+-   I did the evaluation with Confusion matrix, Precision and Recall and ROC plot. We are doing this evaluation as sometimes accuracy might be misleading. As the AUC give us a gold standard metric to judge the classifiers
+
+-   The interesting part was doing the visualizations and doing clustering, as I did try to reduce the features, drop the number of rows to find the optimal number of clusters. I enjoyed the classification as it was straight forward and Decision Tree and KNN are easy to implement. The ROC plot and the Area under the curve was interesting to me as it gives a good metric to judge the classifiers.
+
